@@ -16,7 +16,7 @@ webrick_options = {
     :Port               => 6969,
     :Logger             => WEBrick::Log::new($stderr, WEBrick::Log::DEBUG),
     :DocumentRoot       => "/ruby/htdocs",
-    :SSLEnable          => true,
+    :SSLEnable          => false,
     :SSLVerifyClient    => OpenSSL::SSL::VERIFY_NONE,
     :SSLCertificate     => OpenSSL::X509::Certificate.new(  File.open("cert.pem").read),
     :SSLPrivateKey      => OpenSSL::PKey::RSA.new(          File.open("privkey.pem").read),
@@ -70,7 +70,10 @@ class Server < Sinatra::Base
   File.open('captcha_secret.txt').each do |cap|
     CAPTCHA_KEY = cap.strip
   end
-  $Store = {}
+  $Store = {
+      jobs: {
+      }
+  }
   configure do
     enable :cross_origin
   end
@@ -174,13 +177,13 @@ class Server < Sinatra::Base
         expiry = Time.now.to_i + 3600 * 24
 
         $Store['auth'] = {
-            'value': token,
-            'expiry': expiry
+            value: token,
+            expiry: expiry
         }
       end
       return {
-          'token': token,
-          'expiry': expiry
+          token: token,
+          expiry: expiry
       }.to_json
     else
       puts 'bad pass'
@@ -209,10 +212,10 @@ class Server < Sinatra::Base
 
   post '/manga' do
     return unless auth
-    return 'job in progress' if (File.exist? 'started.t' and not File.exist? 'done.t')
-    `rm -rf out`
-    `rm -rf public/output.zip`
-    `rm done.t`
+    id = rand(1..10000)
+    while $Store[:jobs].key?(id)
+      id = rand(1..10000)
+    end
     url = params['url']
     name = params['name']
     arg1 = params['arg1']
@@ -221,23 +224,21 @@ class Server < Sinatra::Base
     puts name
     puts arg1
     puts arg2
-    `touch started.t`
-    args = "#{url} #{arg1} #{arg2} #{name}"
+    args = "#{id} #{url} #{arg1} #{arg2} #{name}"
     unless sanitize_input(args)
-      `rm started.t`
       'bad input!'
     end
-    command = "ruby ./downloader.rb #{args} && zip -r output.zip out && mv output.zip public/output.zip && touch done.t"
+    command = "ruby ./downloader.rb #{args} && zip -r output_#{id}.zip out_#{id} && mv output_#{id}.zip public/output_#{id}.zip && touch done_#{id}.t"
     pid = spawn(command)
     Process.detach(pid)
+    $Store[:jobs][id] = true
     'started'
   end
 
   get '/manga' do
     return unless auth
-    `rm started.t`
-    `rm progress.t`
-    `rm -rf out`
+    `rm progress_#{id}.t`
+    `rm out/out_#{id}.zip`
     send_file 'public/output.zip', :filename => 'output.zip', :type => 'Application/octet-stream'
   end
 
